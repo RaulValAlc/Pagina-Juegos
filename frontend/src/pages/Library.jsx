@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import api from '../api/axios'
 import GameCard from '../components/GameCard'
 
@@ -15,9 +15,26 @@ export default function Library() {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ name: '', genre: '', platform: '', coverUrl: '', status: 'PENDING' })
 
+  const [rawgQuery, setRawgQuery] = useState('')
+  const [rawgResults, setRawgResults] = useState([])
+  const [rawgLoading, setRawgLoading] = useState(false)
+  const [showRawgResults, setShowRawgResults] = useState(false)
+  const [rawgError, setRawgError] = useState('')
+  const rawgRef = useRef(null)
+
   useEffect(() => {
     loadGames()
   }, [status, page, search])
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (rawgRef.current && !rawgRef.current.contains(e.target)) {
+        setShowRawgResults(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   const loadGames = async () => {
     setLoading(true)
@@ -47,6 +64,46 @@ export default function Library() {
     }
   }
 
+  const searchRawg = async () => {
+    if (!rawgQuery.trim()) return
+    setRawgLoading(true)
+    setRawgError('')
+    setRawgResults([])
+    setShowRawgResults(true)
+    try {
+      const { data } = await api.get('/rawg/search', { params: { query: rawgQuery } })
+      setRawgResults(data)
+    } catch (err) {
+      setRawgError('Error al buscar en RAWG')
+      console.error(err)
+    } finally {
+      setRawgLoading(false)
+    }
+  }
+
+  const selectRawgGame = (game) => {
+    setForm({
+      name: game.name,
+      genre: game.genres,
+      platform: game.platforms ? game.platforms.split(', ')[0] : '',
+      coverUrl: game.coverUrl || '',
+      status: form.status,
+      developer: game.developers,
+      releaseDate: game.released,
+      globalRating: game.rating,
+      rawgId: game.rawgId,
+    })
+    setShowRawgResults(false)
+    setRawgQuery('')
+  }
+
+  const handleRawgKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      searchRawg()
+    }
+  }
+
   return (
     <div className="library-page">
       <div className="page-header">
@@ -58,7 +115,45 @@ export default function Library() {
 
       {showForm && (
         <form className="game-form" onSubmit={handleAddGame}>
-          <input className="input" placeholder="Nombre *" value={form.name} onChange={e => setForm({...form, name: e.target.value})} required />
+          <div className="rawg-search-wrapper" ref={rawgRef}>
+            <div className="rawg-search-row">
+              <input className="input" placeholder="Nombre del juego *" value={form.name}
+                onChange={e => { setForm({...form, name: e.target.value}); setRawgQuery(e.target.value) }}
+                onKeyDown={handleRawgKeyDown} required />
+              <button type="button" className="btn btn-primary btn-rawg-search"
+                onClick={searchRawg} disabled={rawgLoading || !rawgQuery.trim()}>
+                {rawgLoading ? <span className="btn-loader" /> : 'RAWG'}
+              </button>
+            </div>
+            {showRawgResults && (
+              <div className="rawg-results">
+                {rawgLoading && <div className="rawg-results-loading"><span className="spinner" /></div>}
+                {rawgError && <div className="rawg-results-error">{rawgError}</div>}
+                {!rawgLoading && !rawgError && rawgResults.length === 0 && (
+                  <div className="rawg-results-empty">Sin resultados</div>
+                )}
+                {!rawgLoading && rawgResults.map(game => (
+                  <div key={game.rawgId} className="rawg-result-item" onClick={() => selectRawgGame(game)}>
+                    <div className="rawg-result-cover">
+                      {game.coverUrl ? (
+                        <img src={game.coverUrl} alt={game.name} />
+                      ) : (
+                        <span>{game.name.charAt(0)}</span>
+                      )}
+                    </div>
+                    <div className="rawg-result-info">
+                      <div className="rawg-result-name">{game.name}</div>
+                      <div className="rawg-result-meta">
+                        {game.platforms && <span>{game.platforms}</span>}
+                        {game.released && <span>{game.released}</span>}
+                        {game.rating > 0 && <span className="rawg-result-rating">{game.rating.toFixed(1)}</span>}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           <input className="input" placeholder="Género" value={form.genre} onChange={e => setForm({...form, genre: e.target.value})} />
           <input className="input" placeholder="Plataforma" value={form.platform} onChange={e => setForm({...form, platform: e.target.value})} />
           <input className="input" placeholder="URL de portada" value={form.coverUrl} onChange={e => setForm({...form, coverUrl: e.target.value})} />
